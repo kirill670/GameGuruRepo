@@ -339,6 +339,16 @@ function PromptLocalForVR(e,str,vrmode)
  SendMessageS("promptlocalforvr",e,str);
 end
 
+function GetFileExists(filename)
+    local file = io.open(filename, "r")
+    if file then
+        file:close()
+        return 1
+    else
+        return 0
+    end
+end
+
 function SetFogNearest(v)
  SendMessageF("setfognearest",v)
 end
