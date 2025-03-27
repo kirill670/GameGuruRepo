@@ -1797,6 +1797,8 @@ GetGamePlayerStateImmunity: GetGamePlayerStateImmunity() -- command used by the 
 SetGamePlayerStateCharAnimIndex: SetGamePlayerStateCharAnimIndex() -- command used by the default player control mechanism
 GetGamePlayerStateCharAnimIndex: GetGamePlayerStateCharAnimIndex() -- command used by the default player control mechanism
 
+GetGamePlayerStatePlrLogic: GetGamePlayerStatePlrLogic() -- returns state of the player logic (FreezePlayer sets this to zero)
+
 SetGamePlayerStateIsMelee: SetGamePlayerStateIsMelee() -- by default sets current weapon, can specify optional gunid and firemode
 GetGamePlayerStateIsMelee: GetGamePlayerStateIsMelee() -- command used by the default player control mechanism
 SetGamePlayerStateAlternate: SetGamePlayerStateAlternate() -- by default sets current weapon, can specify optional gunid and firemode
