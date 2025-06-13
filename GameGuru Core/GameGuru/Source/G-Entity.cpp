@@ -5,6 +5,14 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "CObjectsC.h"
+#include "SpatialPartition.h" // For CSpatialPartition
+#include "BlitzTerrain.h"     // For BT_GetTerrainWidth, BT_GetTerrainDepth
+#include <vector>             // For std::vector
+#include <algorithm>          // For std::min/max (used in some GGVECTOR3 ops if any)
+#include <float.h>            // For FLT_MAX
+
+// Global instance of the spatial partition system for entities
+static CSpatialPartition g_EntitySpatialPartition;
 
 
 // 
@@ -13,6 +21,26 @@
 
 void entity_init ( void )
 {
+	// Initialize the spatial partition system for entities
+	float worldMinX = 0.0f;
+	float worldMinY = -5000.0f;
+	float worldMinZ = 0.0f;
+	float worldMaxX = 102400.0f; // Default large world size
+	float worldMaxY = 5000.0f;
+	float worldMaxZ = 102400.0f;
+
+	if ( t.terrain.TerrainID > 0 && ObjectExist(t.terrain.TerrainID) )
+	{
+		worldMaxX = BT_GetTerrainWidth(t.terrain.TerrainID);
+		worldMaxZ = BT_GetTerrainDepth(t.terrain.TerrainID);
+		// Using fixed MinY/MaxY for now. Could be refined with terrain height sampling.
+	}
+	// Divisions can be tuned for performance. More divisions = smaller cells.
+	int divisionsX = 64;
+	int divisionsY = 16;
+	int divisionsZ = 64;
+	g_EntitySpatialPartition.Init(worldMinX, worldMinY, worldMinZ, worldMaxX, worldMaxY, worldMaxZ, divisionsX, divisionsY, divisionsZ);
+
 	//  pre-create element data (load from eleprof)
 	timestampactivity(0,"Configure entity instances for use");
 	for ( t.e = 1 ; t.e<=  g.entityelementlist; t.e++ )
@@ -50,6 +78,16 @@ void entity_init ( void )
 					//  Create AI obstacles for all static entities
 					if (  t.entityprofile[t.entid].ismarker == 0 ) 
 					{
+						// Add object to spatial partition
+						if ( t.entityelement[t.e].obj > 0 && ObjectExist(t.entityelement[t.e].obj) )
+						{
+							sObject* pObject = GetObjectData(t.entityelement[t.e].obj);
+							if (pObject)
+							{
+								g_EntitySpatialPartition.AddObject(pObject);
+							}
+						}
+
 						bool bSceneStatic = false;
 						if ( t.entityelement[t.e].staticflag == 1 ) bSceneStatic = true;
 
@@ -608,6 +646,16 @@ void entity_delete ( void )
 
 			//PE: as we are going to reuse the array in next level , reset everything.
 			entity_reset_defaults(); //PE: takes t.e
+
+			// Remove from spatial partition if object existed
+			if ( t.obj > 0 ) // t.obj was set to t.entityelement[t.e].obj
+			{
+				sObject* pObject = GetObjectData(t.obj); // Get object data before it's fully cleared if needed by GetObjectData
+				if (pObject) // Check if it was a valid object
+				{
+					g_EntitySpatialPartition.RemoveObject(pObject);
+				}
+			}
 		}
 	}
 
@@ -616,6 +664,8 @@ void entity_delete ( void )
 	//PE: Create new entities from beginning
 	g.entityviewcurrentobj = g.entityviewstartobj;
 
+	// Could also clear the whole spatial partition grid here if desired, though individual removals should handle it.
+	// g_EntitySpatialPartition.Init(...); // Re-init if full clear needed, or add a Clear() method.
 }
 
 void entity_pauseanimations ( void )
@@ -2064,8 +2114,85 @@ void entity_hasbulletrayhit(void)
 		// 220217 - cannot shoot self with weapon!
 		iIgnoreOneEntityObj = t.entityelement[t.playercontrol.thirdperson.charactere].obj;
 	}
-	t.thitvalue=IntersectAll(g.entityviewstartobj,g.entityviewendobj,t.brayx1_f,t.brayy1_f,t.brayz1_f,t.brayx2_f,t.brayy2_f,t.brayz2_f,iIgnoreOneEntityObj);
-	if (  t.thitvalue>0 ) 
+
+	// Query spatial partition for potential hits
+	std::vector<sObject*> potentialHits = g_EntitySpatialPartition.QueryRay(t.brayx1_f, t.brayy1_f, t.brayz1_f, t.brayx2_f, t.brayy2_f, t.brayz2_f);
+
+	t.thitvalue = 0;
+	float fClosestHitDistSq = FLT_MAX;
+	int closestHitObjID = 0;
+
+	float finalRayEndX = t.brayx2_f; // Ray end X, possibly shortened by terrain
+	float finalRayEndY = t.brayy2_f; // Ray end Y
+	float finalRayEndZ = t.brayz2_f; // Ray end Z
+
+	for (sObject* pPotentialHit : potentialHits)
+	{
+		if (!pPotentialHit || pPotentialHit->iID == 0) continue;
+		if (pPotentialHit->iID == iIgnoreOneEntityObj) continue;
+		if (ObjectExist(pPotentialHit->iID) == 0) continue;
+
+		// Use IntersectObject. Pass the original full ray (t.x1_f..t.z2_f) for this specific object.
+		float hitResultDistance = IntersectObject(pPotentialHit->iID, t.x1_f, t.y1_f, t.z1_f, t.x2_f, t.y2_f, t.z2_f);
+
+		if (hitResultDistance > 0.00001f) // A hit occurred
+		{
+			// Assuming IntersectObject populates ChecklistFValueA/B/C with the exact hit point for pPotentialHit->iID
+			float currentHitX = ChecklistFValueA(6);
+			float currentHitY = ChecklistFValueB(6);
+			float currentHitZ = ChecklistFValueC(6);
+
+			GGVECTOR3 vecHitPoint(currentHitX, currentHitY, currentHitZ);
+			GGVECTOR3 vecRayStart(t.brayx1_f, t.brayy1_f, t.brayz1_f);
+			GGVECTOR3 vecToHit = GGVec3Subtract(vecHitPoint, vecRayStart);
+			float distToHitSq = GGVec3LengthSq(&vecToHit);
+
+			// Check if this hit is closer than any previous object hit AND not further than the current ray end (finalRayEndX/Y/Z)
+			GGVECTOR3 vecRayEndShortened(finalRayEndX, finalRayEndY, finalRayEndZ);
+			GGVECTOR3 vecRaySegmentShortened = GGVec3Subtract(vecRayEndShortened, vecRayStart);
+			float raySegmentShortenedLengthSq = GGVec3LengthSq(&vecRaySegmentShortened);
+
+			if (distToHitSq < fClosestHitDistSq && distToHitSq <= raySegmentShortenedLengthSq + 0.001f)
+			{
+				fClosestHitDistSq = distToHitSq;
+				closestHitObjID = pPotentialHit->iID;
+
+				// Update where the ray is considered to end for subsequent checks in this loop
+				finalRayEndX = currentHitX;
+				finalRayEndY = currentHitY;
+				finalRayEndZ = currentHitZ;
+			}
+		}
+	}
+
+	if (closestHitObjID > 0)
+	{
+		t.thitvalue = closestHitObjID;
+		// Call IntersectAll for ONLY the closest object to populate the global checklist reliably.
+		// This ensures ChecklistValueA(9) (material) and ChecklistValueB(1) (limb) are correct.
+		// Use original full ray (t.x1_f..t.z2_f) for this specific IntersectAll call, as it does its own distance check.
+		IntersectAll(t.thitvalue, t.thitvalue, t.x1_f, t.y1_f, t.z1_f, t.x2_f, t.y2_f, t.z2_f, iIgnoreOneEntityObj);
+
+		// Update ray to this confirmed closest hit point from the checklist
+		t.brayx2_f = ChecklistFValueA(6);
+		t.brayy2_f = ChecklistFValueB(6);
+		t.brayz2_f = ChecklistFValueC(6);
+
+		t.tlimbhit = ChecklistValueB(1);
+		t.tmaterialvalue = ChecklistValueA(9);
+	}
+	else
+	{
+		// No object hit by ray, or no object closer than terrain.
+		// Ray end remains as shortened by terrain (or original if no terrain hit).
+		t.brayx2_f = finalRayEndX;
+		t.brayy2_f = finalRayEndY;
+		t.brayz2_f = finalRayEndZ;
+		// t.tlimbhit and t.tmaterialvalue remain -1 or as set by initial terrain hit.
+	}
+
+	// Original code continues from here, using t.thitvalue, t.brayx2_f (now precise hit point), t.tlimbhit, t.tmaterialvalue
+	if (  t.thitvalue > 0 )
 	{
 		//  check if it was a character creator object hit and find the main body object
 		if (  t.characterkitcontrol.gameHasCharacterCreatorIn  ==  1 ) 
@@ -2876,13 +3003,30 @@ void entity_createobj ( void )
 
 		EnableObjectZWrite (  t.sourceobj );
 		//  Create new object
-		bool bUniqueSpecular = entity_isuniquespecularoruv ( t.tupdatee );
+		bool bUniqueSpecularOrUV = entity_isuniquespecularoruv ( t.tupdatee );
 
-		//PE: We also need it to be a clone in Classic for head to work.
+		// Determine if object needs to be a clone from the start
 		bool bCreateAsClone = false;
-		if ( t.entityprofile[t.tentid].ismarker != 0 || t.entityprofile[t.tentid].cpuanims != 0 || t.entityprofile[t.gridentity].isebe != 0 || bUniqueSpecular == true ) bCreateAsClone = true;
-		if ( t.entityprofile[t.tentid].ischaractercreator == 1 ) bCreateAsClone = true; // needed to keep head attached!
+		if ( t.entityprofile[t.tentid].ismarker != 0 ) bCreateAsClone = true;
+		if ( t.entityprofile[t.tentid].cpuanims != 0 ) bCreateAsClone = true;
+		// Assuming t.entityprofile[t.gridentity].isebe was a typo and meant t.entityprofile[t.tentid].isebe
+		if ( t.entityprofile[t.tentid].isebe != 0 ) bCreateAsClone = true;
+		if ( bUniqueSpecularOrUV == true ) bCreateAsClone = true;
+		if ( t.entityprofile[t.tentid].ischaractercreator == 1 ) bCreateAsClone = true;
 
+		// New conditions for proactive cloning based on animation speed properties
+		// (only if t.tupdatee is valid, which it should be if we are creating an entity instance t.entityelement[t.tupdatee])
+		if ( t.tupdatee != -1 )
+		{
+			if ( t.entityelement[t.tupdatee].eleprof.animspeed != t.entityprofile[t.tentid].animspeed )
+			{
+				bCreateAsClone = true;
+			}
+			if ( t.entityelement[t.tupdatee].animspeedmod != 1.0f )
+			{
+				bCreateAsClone = true;
+			}
+		}
 
 		if ( bCreateAsClone == true )
 		{

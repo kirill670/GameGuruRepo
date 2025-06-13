@@ -1,0 +1,192 @@
+# AI Obstacle Generation - Offline Process Design
+
+## 1. Overview
+
+This document outlines the design for an offline process to generate AI obstacle data (`map.obs` file) for GameGuru maps. This process aims to replace the current runtime generation, potentially improving level load times and enabling more complex obstacle setups if needed. The design is based on analysis of the existing runtime generation code found in `G-Entity.cpp` (`entity_init`) and `M-DAI.cpp` (`darkai_preparedata`, `darkai_setup_entity`, `darkai_setup_tree`).
+
+## 2. Inputs and Outputs
+
+### Inputs:
+
+1.  **Map File (`.fpm`):** The primary input containing entity placements, properties, and terrain information.
+2.  **Entity Profile Files (`.fpe`):** Required to determine entity properties like `ismarker`, `collisionmode`, `forcesimpleobstacle`, `isobjective`, static flags, etc.
+3.  **Game/Global Configuration (Potentially):**
+    *   Flags like `g.aidisableobstacles` or `g.aidisabletreeobstacles` might influence whether obstacles are generated. The offline tool should likely assume these are enabled for generation unless specified otherwise via a command-line flag.
+    *   Default terrain height if no terrain object is present.
+4.  **DarkAI Configuration (Implicit):** The internal constants and thresholds used by DarkAI functions (e.g., expansion values for bounding boxes) will be part of the generation logic.
+
+### Outputs:
+
+1.  **AI Obstacle File (`map.obs`):** A binary file storing the generated obstacle data, typically saved in the same directory as the map file.
+    *   **Format (based on `ai_obstacle_generation_code.txt` snippets):**
+        *   `LONG version` (e.g., 1)
+        *   `LONG num_regular_obstacles`
+        *   For each regular obstacle:
+            *   `FLOAT x1, y1, z1, x2, y2, z2` (obstacle bounding box min/max world coordinates)
+            *   `FLOAT angle` (obstacle y-rotation in degrees)
+            *   `LONG is_objective_marker` (0 or 1, derived from `t.entityelement[e].eleprof.isobjective`)
+            *   `FLOAT base_y` (obstacle's effective base y position on terrain/ground)
+            *   `FLOAT height` (obstacle's effective height from its base_y)
+        *   `LONG num_tree_obstacles`
+        *   For each tree obstacle:
+            *   `FLOAT x, z` (world position)
+            *   `LONG type` (derived from `collisionmode-50`)
+            *   `FLOAT scale` (object scale, typically X scale / 100.0)
+
+2.  **Log File (Optional):** A text file (`map_obs_generation.log`) detailing:
+    *   Number of entities processed.
+    *   Number of regular obstacles generated.
+    *   Number of tree obstacles generated.
+    *   Any errors or warnings encountered (e.g., missing FPEs, invalid entity data).
+    *   Generation time.
+
+3.  **Visualization Data (Optional):** A simple file format (e.g., text list of boxes/cylinders with positions and dimensions) that can be imported into the editor to visually inspect the generated obstacles.
+
+## 3. Generation Steps (Offline Tool)
+
+The offline tool (whether an editor function or a command-line utility) will perform the following steps:
+
+1.  **Initialization:**
+    *   Set up access to necessary game data paths (for FPEs, map files).
+    *   Initialize internal data structures to hold obstacle information before writing to file. This mimics `g.darkai.obs`, `g.darkai.treeobs`, `g.darkai.numobs`, `g.darkai.numtreeobs`.
+
+2.  **Load Map Data:**
+    *   Open and parse the specified `.fpm` map file.
+    *   Load terrain data if present (e.g., `t.terrain.TerrainID`, `BT_GetTerrainWidth`, `BT_GetTerrainDepth`, `BT_GetGroundHeight`).
+    *   Iterate through all entity elements (`t.entityelement[e]`) defined in the map.
+
+3.  **Entity Processing Loop:**
+    For each entity `e` from `1` to `g.entityelementlist`:
+    *   Get `t.entid = t.entityelement[t.e].bankindex`. Skip if `t.entid <= 0`.
+    *   Load/access entity profile: `t.entityprofile[t.entid]` and `t.entityelement[t.e].eleprof`.
+    *   Get object ID: `t.tobj = t.entityelement[t.e].obj`. Skip if `t.tobj <= 0` or `ObjectExist(t.tobj) == 0`. (The tool will need access to object functions).
+    *   **Filter for Obstacle Candidates:**
+        *   `t.entityprofile[t.entid].ismarker == 0`
+        *   `bSceneStatic = (t.entityelement[t.e].staticflag == 1)` (The runtime code also considers `t.entityelement[t.e].eleprof.isimmobile == 1` for dynamic objects, this might need clarification for offline tool logic).
+        *   `bSceneStatic == true` (primarily static objects).
+        *   `t.entityprofile[t.entid].collisionmode != 11 && t.entityprofile[t.entid].collisionmode != 12`.
+
+4.  **Obstacle Type Dispatch & Data Extraction:**
+
+    *   **A. Tree Obstacles:**
+        *   Condition: `t.entityprofile[t.entid].collisionmode >= 50 && t.entityprofile[t.entid].collisionmode < 60`.
+        *   If `g.aidisabletreeobstacles == 0` (or tool equivalent is "enabled"):
+            *   `tree_type = t.entityprofile[t.entid].collisionmode - 50;`
+            *   `tree_x = ObjectPositionX(t.tobj);`
+            *   `tree_z = ObjectPositionZ(t.tobj);`
+            *   `tree_scale = ObjectScaleX(t.tobj) / 100.0f;` (Note: uses X scale only in reference code)
+            *   Add to a temporary list of tree obstacles.
+
+    *   **B. Regular Static Obstacles:**
+        *   Else (not a tree obstacle as per above).
+        *   If `g.aidisableobstacles == 0` (or tool equivalent is "enabled"):
+            *   `obs_angle = ObjectAngleY(t.tobj);`
+            *   `obs_isobjective = t.entityelement[t.e].eleprof.isobjective;`
+            *   **Bounding Box Calculation (mimicking `darkai_setup_entity`):**
+                *   `obminx = ObjectPositionX(t.tobj) + GetObjectCollisionCenterX(t.tobj) - GetObjectCollisionRadiusX(t.tobj);` (and for Y, Z, Max)
+                *   `obcenx = (obminx + obmaxx) / 2.0f;` (and for Y, Z)
+                *   `obextraminx = obminx - 20.0f;` (and for Xmax, Zmin, Zmax; Ymin/max are not expanded with 'extra')
+            *   **Height Calculation (mimicking `darkai_setobstacleheight`):**
+                *   `obs_base_y = ObjectPositionY(t.tobj) + GetObjectCollisionCenterY(t.tobj) - GetObjectCollisionRadiusY(t.tobj);`
+                *   `obs_height = GetObjectCollisionRadiusY(t.tobj) * 2.0f;`
+                *   If `t.entityprofile[t.entid].forcesimpleobstacle == 1`:
+                    *   `obs_base_y = BT_GetGroundHeight(terrain_id, obcenx, obcenz);` (Requires terrain access)
+                    *   `obs_height = (ObjectPositionY(t.tobj) + GetObjectCollisionCenterY(t.tobj) + GetObjectCollisionRadiusY(t.tobj)) - obs_base_y;`
+                    *   If `obs_height < 0.1f`, then `obs_height = 0.1f;`
+            *   Add to a temporary list of regular obstacles: `obextraminx, obs_base_y, obextraminz, obextramaxx, obs_base_y + obs_height, obextramaxz, obs_angle, obs_isobjective, obs_base_y, obs_height`. (Note: Y values for box are `obs_base_y` and `obs_base_y + obs_height`).
+
+5.  **Write `map.obs` File:**
+    *   Open `map.obs` (e.g., `mapbank\[mapname]\map.obs`) in binary write mode.
+    *   Write `LONG version = 1;`
+    *   Write `LONG num_regular_obstacles = temporary_regular_obstacle_list.size();`
+    *   For each regular obstacle in the temporary list:
+        *   `WriteFloat(x1); WriteFloat(y1); WriteFloat(z1);`
+        *   `WriteFloat(x2); WriteFloat(y2); WriteFloat(z2);`
+        *   `WriteFloat(angle);`
+        *   `WriteLong(is_objective);`
+        *   `WriteFloat(base_y);`
+        *   `WriteFloat(height);`
+    *   Write `LONG num_tree_obstacles = temporary_tree_obstacle_list.size();`
+    *   For each tree obstacle in the temporary list:
+        *   `WriteFloat(x); WriteFloat(z);`
+        *   `WriteLong(type);`
+        *   `WriteFloat(scale);`
+    *   Close the file.
+
+## 4. Integration into Development Workflow
+
+*   **Recommended: Editor Tool Button**
+    *   A menu option within the GameGuru Editor (e.g., "File -> Generate AI Obstacles" or a button in a map tools panel).
+    *   **Action:** When clicked, the editor executes the obstacle generation logic using the currently loaded map data.
+    *   **Output:** The `map.obs` file is saved into the current map's folder.
+    *   **Feedback:** The editor should provide immediate feedback (e.g., "AI Obstacles Generated: X regular, Y tree obstacles" or error messages).
+    *   **Pros:** Most user-friendly for level designers. Easy to regenerate after changes.
+    *   **Cons:** The generation process, if lengthy, might temporarily freeze the editor unless run in a separate thread with progress updates. Requires source code access to the editor.
+
+*   **Alternative: Command-Line Utility**
+    *   A standalone executable (e.g., `GameGuruObstacleGen.exe`).
+    *   **Command Example:** `GameGuruObstacleGen.exe --map "C:\GameGuru\Files\mapbank\mymap\mymap.fpm"`
+        *   It could infer FPE paths from standard GameGuru installation structure or require them as arguments.
+        *   Output `map.obs` would default to the map's directory.
+    *   **Pros:** Can be integrated into automated build/packaging scripts. Does not require editor source modification if it can access game data files and necessary engine functions (potentially via a stripped-down engine library).
+    *   **Cons:** Less convenient for designers for quick iteration. Setting up paths might be more complex.
+
+## 5. Game Runtime Modifications for Loading Pre-generated Data
+
+1.  **`darkai_preparedata()` (in `M-DAI.cpp`):**
+    *   This function will be the primary point for loading the `.obs` file.
+    *   Logic:
+        ```cpp
+        // Construct path to map.obs (e.g., using g.gsystem.mapbankAbs_s + mapname + "\\map.obs")
+        // If file_exist(map_obs_file):
+        //   OpenFile(1, map_obs_file)
+        //   ReadLong(1, version)
+        //   If version == 1:
+        //     ReadLong(1, g.darkai.numobs)
+        //     Dim g.darkai.obs[g.darkai.numobs] // If using dynamic arrays, resize
+        //     For o = 1 to g.darkai.numobs
+        //       ReadFloat(1, g.darkai.obs[o].x1) ... ReadFloat(1, g.darkai.obs[o].height)
+        //     Next o
+        //     ReadLong(1, g.darkai.numtreeobs)
+        //     Dim g.darkai.treeobs[g.darkai.numtreeobs]
+        //     For o = 1 to g.darkai.numtreeobs
+        //       ReadFloat(1, g.darkai.treeobs[o].x) ... ReadFloat(1, g.darkai.treeobs[o].scale)
+        //     Next o
+        //     CloseFile(1)
+        //     // darkai_refresh_obstacles(); // If such a function exists/is needed
+        //     // Set a flag indicating data loaded, so entity_init skips generation
+        //     g.bObstacleDataLoadedFromFile = true;
+        //   Else:
+        //     // Version mismatch, handle error or fallback
+        //     CloseFile(1);
+        //     g.bObstacleDataLoadedFromFile = false; // Fallback to runtime gen or no obstacles
+        //   EndIf
+        // Else:
+        //   // map.obs not found
+        //   g.bObstacleDataLoadedFromFile = false; // Fallback to runtime gen or no obstacles
+        // EndIf
+        //
+        // If !g.bObstacleDataLoadedFromFile AND (runtime_generation_enabled_globally_or_for_dev):
+        //   darkai_setup_entityobstacles(); // old runtime path
+        //   darkai_setup_treeobstacles();   // old runtime path
+        // Else if !g.bObstacleDataLoadedFromFile:
+        //   // No obstacles and no runtime generation
+        //   g.darkai.numobs = 0;
+        //   g.darkai.numtreeobs = 0;
+        // EndIf
+        ```
+
+2.  **`entity_init()` (in `G-Entity.cpp`):**
+    *   The loops that call `darkai_setup_entity()` and `darkai_setup_tree()` should be entirely removed or made conditional based on `g.bObstacleDataLoadedFromFile`. If the data is loaded from `map.obs`, these runtime generation calls are no longer needed.
+
+## 6. Data Access for Offline Tool
+
+The offline tool will need to replicate or link to engine functionality for:
+*   Loading `.fpm` files.
+*   Loading and parsing `.fpe` files.
+*   Accessing object properties: `ObjectExist`, `ObjectPositionX/Y/Z`, `ObjectAngleY`, `ObjectScaleX`, `GetObjectCollisionCenterX/Y/Z/Radius`, `sObject->collision.vecMin/Max`.
+*   Terrain functions: `BT_GetGroundHeight`.
+
+This might involve creating a "headless" version of parts of the engine or carefully refactoring existing code into libraries that the tool can use.
+
+This design prioritizes shifting AI obstacle generation offline, improving runtime performance and consistency. The editor tool integration is favored for usability.
