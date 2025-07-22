@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "cThreadPool.h"
 #include "cOccluderThread.h"
 #include "CGfxC.h"
 #include "DarkLUA.h"
@@ -33,6 +34,11 @@ extern bool g_bInTutorialMode;
 #endif
 
 // Globals
+cThreadPool* g_pThreadPool = NULL;
+PortalRenderer* g_pPortalRenderer = NULL;
+DynamicResolution* g_pDynamicResolution = NULL;
+LODManager* g_pLODManager = NULL;
+Voxelizer* g_pVoxelizer = NULL;
 bool g_bInEditor = true;
 int g_iMasterRootState = 0;
 int g_iActivelyUsingVRNow = 0;
@@ -51,6 +57,11 @@ void gameexecutable_init(void)
 {
 	// start game init code
 	int iEXEGameIsVR = 0;
+	g_pThreadPool = new cThreadPool(std::thread::hardware_concurrency());
+	g_pPortalRenderer = new PortalRenderer();
+	g_pDynamicResolution = new DynamicResolution();
+	g_pLODManager = new LODManager();
+	g_pVoxelizer = new Voxelizer(128);
 	editor_previewmap_initcode(iEXEGameIsVR);
 	//#ifndef PRODUCTCLASSIC
     #ifdef ENABLEIMGUI
@@ -66,6 +77,28 @@ void gameexecutable_loop(void)
 
 void gameexecutable_finish(void)
 {
+	// Free thread pool
+	if (g_pThreadPool)
+	{
+		delete g_pThreadPool;
+		g_pThreadPool = NULL;
+	}
+	if (g_pPortalRenderer)
+	{
+		delete g_pPortalRenderer;
+		g_pPortalRenderer = NULL;
+	}
+	if (g_pDynamicResolution)
+	{
+		delete g_pDynamicResolution;
+		g_pDynamicResolution = NULL;
+	}
+	if (g_pVoxelizer)
+	{
+		delete g_pVoxelizer;
+		g_pVoxelizer = NULL;
+	}
+
 	// Only if not quitting standalone
 	bool bUseFragmentationMainloop = false;
 	if (t.game.allowfragmentation == 0 || t.game.allowfragmentation == 2)
@@ -2513,6 +2546,14 @@ void game_setresolution ( void )
 	t.multisamplingfactor=0;
 	t.multimonitormode=0;
 	SetDisplayMode (  GetDesktopWidth(),GetDesktopHeight(),32,g.gvsync,t.multisamplingfactor,t.multimonitormode );
+	if (g_pDynamicResolution)
+	{
+		g_pDynamicResolution->setResolution(GetDesktopWidth(), GetDesktopHeight());
+	}
+	// handle different aspect ratios
+	float aspect = (float)GetDesktopWidth() / (float)GetDesktopHeight();
+	SetCameraAspect(0, aspect);
+
 	SyncOn (   ); SyncRate (  0  ); Sync (   ); SetAutoCamOff (  );
 	DisableEscapeKey (  );
 }
@@ -3584,12 +3625,8 @@ void game_timeelapsed ( void )
 	// Calculate time between cycles
 	float fThisTimeCount = timeGetSecond();
 	t.ElapsedTime_f = fThisTimeCount - t.LastTimeStamp_f;
-	g.timeelapsed_f = t.ElapsedTime_f * 20.0;
+	g.timeelapsed_f = 1.0f / 60.0f;
 	t.LastTimeStamp_f = fThisTimeCount;
-
-	//  Cap to around 25fps so that leaps in movement/speed not to severe!
-	if (  g.timeelapsed_f>0.75f  )  g.timeelapsed_f = 0.75f;
-	if (  g.timeelapsed_f<0.00833f  )  g.timeelapsed_f = 0.00833f;
 }
 
 #ifdef VRTECH
@@ -4317,9 +4354,79 @@ void game_main_loop ( void )
 		if ( g.autoloadgun != 0 ) { g.autoloadgun=0 ; gun_change ( ); }
 	}
 
+	// Update LOD manager
+	if (g_pLODManager)
+	{
+		g_pLODManager->update(cVector3(CameraPositionX(0), CameraPositionY(0), CameraPositionZ(0)));
+	}
+
+	// Voxelize the scene
+	if (g_pVoxelizer)
+	{
+		std::vector<int> objectIDs;
+		for (int i = 1; i <= g.entityelementlist; ++i)
+		{
+			if (t.entityelement[i].obj > 0)
+			{
+				objectIDs.push_back(t.entityelement[i].obj);
+			}
+		}
+		g_pVoxelizer->voxelize(objectIDs);
+		if (GetEffectExist(g.postprocesseffectoffset + 9) == 1)
+		{
+			// a shader that can take a texture3D would be better, but this is a quick hack to get it working
+			// Lock the texture to get a pointer to its memory.
+			LockPixels(g.postprocessimageoffset + 10);
+			// Write the voxel data to the texture.
+			for (int z = 0; z < 128; ++z)
+			{
+				for (int y = 0; y < 128; ++y)
+				{
+					for (int x = 0; x < 128; ++x)
+					{
+						int index = x + y * 128 + z * 128 * 128;
+						if (g_pVoxelizer->getVoxelData()[index] == 1)
+						{
+							SetPixel(x, y + z * 128, Rgb(255, 255, 255));
+						}
+						else
+						{
+							SetPixel(x, y + z * 128, Rgb(0, 0, 0));
+						}
+					}
+				}
+			}
+			// Unlock the texture.
+			UnlockPixels();
+		}
+	}
+
 	//  Update HUD Layer objects (jetpack)
 	if ( g.gproducelogfiles == 2 ) timestampactivity(0,"calling hud_updatehudlayerobjects");
 	hud_updatehudlayerobjects ( );
+
+	// Render portals
+	if (g_pPortalRenderer)
+	{
+		g_pPortalRenderer->render();
+	}
+
+	// Apply dynamic resolution scaling
+	if (g_pDynamicResolution)
+	{
+		g_pDynamicResolution->setSlice(0, 0.1f, 1000.0f);
+		g_pDynamicResolution->apply();
+		// Render scene for slice 0
+		g_pDynamicResolution->setSlice(1, 1000.0f, 2000.0f);
+		g_pDynamicResolution->apply();
+		// Render scene for slice 1
+		g_pDynamicResolution->setSlice(2, 2000.0f, 4000.0f);
+		g_pDynamicResolution->apply();
+		// Render scene for slice 2
+		g_pDynamicResolution->setSlice(3, 4000.0f, 8000.0f);
+		g_pDynamicResolution->apply();
+		// Render scene for slice 3
+	}
 
 	//  Call this at end of game loop to ensure character objects sufficiently overridden
 	if ( g.gproducelogfiles == 2 ) timestampactivity(0,"calling darkai_finalsettingofcharacterobjects");
@@ -4359,6 +4466,18 @@ void game_sync ( void )
 {
 	//  Work out overall time spent per cycle
 	t.game.perf.overall += PerformanceTimer()-g.gameperfoveralltimestamp ; g.gameperfoveralltimestamp=PerformanceTimer();
+
+	// Cap FPS at 60
+	static DWORD lastTime = 0;
+	DWORD currentTime = timeGetTime();
+	if (lastTime == 0)
+		lastTime = currentTime;
+	DWORD timePassed = currentTime - lastTime;
+	if (timePassed < 16)
+	{
+		Sleep(16 - timePassed);
+	}
+	lastTime = currentTime;
 
 	//  HUD Damage Display
 	if ( g.gproducelogfiles == 2 ) timestampactivity(0,"calling controlblood");

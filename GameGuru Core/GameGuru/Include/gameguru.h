@@ -65,6 +65,10 @@
 #include "M-UndoSys-Terrain.h"
 #include "MapEditor.h"
 #include "Types.h"
+#include "PortalRenderer.h"
+#include "DynamicResolution.h"
+#include "LODManager.h"
+#include "Voxelizer.h"
 
 // Engine Includes
 #include "CTextC.h"
@@ -2174,7 +2178,7 @@ struct Sglobals
 
 };
 
-extern Sglobals g;
+#include "globals.h"
 
 // Temp Struct
 struct Stemps
@@ -8692,5 +8696,3 @@ struct Stemps
 	// End of Constructor
 
 };
-
-extern Stemps t;

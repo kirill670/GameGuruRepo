@@ -371,9 +371,10 @@ void placeblood ( int damage, int x, int y, int z, int howfar )
 			t.screenblood[find].image=t.huddamage.bloodstart+Rnd(t.huddamage.maxbloodsplats);
 
 			//  position and scale
+			float fScale = (float)GetDisplayHeight() / 1080.0f;
 			t.screenblood[find].x=Rnd(GetDisplayWidth())-256;
 			t.screenblood[find].y=Rnd(GetDisplayHeight())-256;
-			t.screenblood[find].scale=80+damage+(Rnd(40));
+			t.screenblood[find].scale=(80+damage+(Rnd(40))) * fScale;
 			ScaleSprite (  t.screenblood[find].image,t.screenblood[find].scale );
 
 			//  set life
@@ -492,7 +493,8 @@ void new_damage_marker ( int entity, int x, int z, int y, int tempdamage )
 			t.damagemarker[find].used=1;
 			t.damagemarker[find].image=t.huddamage.indicator;
 			t.damagemarker[find].time=Timer();
-			t.damagemarker[find].scale=100;
+			float fScale = (float)GetDisplayHeight() / 1080.0f;
+			t.damagemarker[find].scale=100 * fScale;
 			t.damagemarker[find].entity=entity;
 			//  store damage start location
 			t.damagemarker[find].lx=x;

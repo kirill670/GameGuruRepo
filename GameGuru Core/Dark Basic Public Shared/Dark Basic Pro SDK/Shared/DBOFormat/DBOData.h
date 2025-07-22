@@ -1042,6 +1042,10 @@ struct sObject : public sObjectData,
 	// Increment this when another object depends on this object.
     DWORD                           dwDependencyCount;
 
+	// LOD textures
+	LPGGTEXTURE pLodTexture[4];
+	LPGGSHADERRESOURCEVIEW pLodTextureView[4];
+
 	// Dave - added for character creator
 	sObjectCharacterCreator*		pCharacterCreator;
 	int CachedNearestLightId[MAXDYNLIGHTS];
