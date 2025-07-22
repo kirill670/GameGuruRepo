@@ -4,6 +4,8 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "cThreadPool.h"
+#include "threading_utils.h"
 #include "CObjectsC.h"
 
 
@@ -11,122 +13,122 @@
 //  ENTITY GAME CODE
 // 
 
-void entity_init ( void )
+void entity_init_thread(int e)
 {
-	//  pre-create element data (load from eleprof)
-	timestampactivity(0,"Configure entity instances for use");
-	for ( t.e = 1 ; t.e<=  g.entityelementlist; t.e++ )
-	{
-		t.entid=t.entityelement[t.e].bankindex;
-		entity_configueelementforuse ( );
-	}
+	t.entid = t.entityelement[e].bankindex;
+	entity_configueelementforuse();
 
-	//  activate all entities and perform any pre-test game setup
-	timestampactivity(0,"Configure entity attachments and AI obstacles");
-	g.entityattachmentindex=0;
-
-	//PE: Could we use collisionmode == 0 and only create it as a box ? and not all faces.
-	//PE: t.tobstype=t.entityprofile[t.entid].forcesimpleobstacle = true;
-	//PE: This takes 30 sec. and take 400 MB. mem in FatherIsland, perhaps another faster way could be made.
-	for ( t.e = 1 ; t.e<=  g.entityelementlist; t.e++ )
+	if (t.entid > 0)
 	{
-		t.entid=t.entityelement[t.e].bankindex;
-		if (  t.entid>0 ) 
+		//  Activate entity
+		t.entityelement[e].active = 1;
+		t.tobj = t.entityelement[e].obj;
+		if (t.tobj > 0)
 		{
-			//  Activate entity
-			t.entityelement[t.e].active=1;
-			t.tobj=t.entityelement[t.e].obj;
-			if (  t.tobj>0 ) 
+			//  if object exists
+			if (ObjectExist(t.tobj) == 1)
 			{
-				//  if object exists
-				if (  ObjectExist(t.tobj) == 1 ) 
+				//  Create attachents for entity
+				entity_createattachment();
+				//  Reset AI Obstacle Center references (used later by physics placement)
+				t.entityelement[e].abscolx_f = -1;
+				t.entityelement[e].abscolz_f = -1;
+				t.entityelement[e].abscolradius_f = -1;
+				//  Create AI obstacles for all static entities
+				if (t.entityprofile[t.entid].ismarker == 0)
 				{
-					//  Create attachents for entity
-					entity_createattachment ( );
-					//  Reset AI Obstacle Center references (used later by physics placement)
-					t.entityelement[t.e].abscolx_f=-1;
-					t.entityelement[t.e].abscolz_f=-1;
-					t.entityelement[t.e].abscolradius_f=-1;
-					//  Create AI obstacles for all static entities
-					if (  t.entityprofile[t.entid].ismarker == 0 ) 
-					{
-						bool bSceneStatic = false;
-						if ( t.entityelement[t.e].staticflag == 1 ) bSceneStatic = true;
+					bool bSceneStatic = false;
+					if (t.entityelement[e].staticflag == 1) bSceneStatic = true;
 
-						// leelee, sometimes want to make dynamic immobile entities AI obstacles!! (exploding crate in Escape level)
-						// if ( t.entityelement[t.e].staticflag == 0 && t.entityelement[t.e].eleprof.isimmobile == 1 ) bSceneStatic = true;
-						if ( bSceneStatic == true && t.entityprofile[t.entid].collisionmode != 11 && t.entityprofile[t.entid].collisionmode != 12 ) 
+					// leelee, sometimes want to make dynamic immobile entities AI obstacles!! (exploding crate in Escape level)
+					// if ( t.entityelement[e].staticflag == 0 && t.entityelement[e].eleprof.isimmobile == 1 ) bSceneStatic = true;
+					if (bSceneStatic == true && t.entityprofile[t.entid].collisionmode != 11 && t.entityprofile[t.entid].collisionmode != 12)
+					{
+						t.tfullheight = 1;
+						t.tcontainerid = 0;
+						if (t.entityprofile[t.entid].collisionmode >= 50 && t.entityprofile[t.entid].collisionmode < 60)
 						{
-							t.tfullheight=1;
-							t.tcontainerid=0;
-							if (  t.entityprofile[t.entid].collisionmode >= 50 && t.entityprofile[t.entid].collisionmode<60 ) 
+							t.ttreemode = t.entityprofile[t.entid].collisionmode - 50;
+							//  dont need to setup ai for multiplayer since it doesnt use any ai - unless coop mode!
+							if (g.aidisabletreeobstacles == 0 && (t.game.runasmultiplayer == 0 || (g.mp.coop == 1 && t.entityprofile[t.entid].ismultiplayercharacter == 0)))
 							{
-								t.ttreemode=t.entityprofile[t.entid].collisionmode-50;
-								//  dont need to setup ai for multiplayer since it doesnt use any ai - unless coop mode!
-								if ( g.aidisabletreeobstacles == 0 && (t.game.runasmultiplayer == 0 || ( g.mp.coop  ==  1 && t.entityprofile[t.entid].ismultiplayercharacter  ==  0 ) ) ) 
-								{
-									darkai_setup_tree ( );
-								}
-							}
-							else
-							{
-								//  dont need to setup ai for multiplayer since it doesnt use any ai
-								if (  t.game.runasmultiplayer == 0 || ( g.mp.coop  ==  1 && t.entityprofile[t.entid].ismultiplayercharacter  ==  0 ) ) 
-								{
-									if (g.aidisableobstacles == 0 && t.entityprofile[t.entid].collisionmode != 11 && t.entityprofile[t.entid].collisionmode != 12)
-									{
-										darkai_setup_entity();
-									}
-								}
+								darkai_setup_tree();
 							}
 						}
-					}
-					//  ensure all transparent static objects are removed from 'intersect all' consideration
-					t.tokay=0;
-					if (  t.entityelement[t.e].staticflag == 1 ) 
-					{
-						if (  t.entityprofile[t.entid].canseethrough == 1 ) 
+						else
 						{
-							t.tokay=1;
+							//  dont need to setup ai for multiplayer since it doesnt use any ai
+							if (t.game.runasmultiplayer == 0 || (g.mp.coop == 1 && t.entityprofile[t.entid].ismultiplayercharacter == 0))
+							{
+								if (g.aidisableobstacles == 0 && t.entityprofile[t.entid].collisionmode != 11 && t.entityprofile[t.entid].collisionmode != 12)
+								{
+									darkai_setup_entity();
+								}
+							}
 						}
 					}
-					if (  t.entityprofile[t.entid].ischaracter == 0 ) 
+				}
+				//  ensure all transparent static objects are removed from 'intersect all' consideration
+				t.tokay = 0;
+				if (t.entityelement[e].staticflag == 1)
+				{
+					if (t.entityprofile[t.entid].canseethrough == 1)
 					{
-						if (  t.entityprofile[t.entid].collisionmode == 11  )  t.tokay = 1;
+						t.tokay = 1;
 					}
-					if (  t.tokay == 1 ) 
+				}
+				if (t.entityprofile[t.entid].ischaracter == 0)
+				{
+					if (t.entityprofile[t.entid].collisionmode == 11)  t.tokay = 1;
+				}
+				if (t.tokay == 1)
+				{
+					SetObjectCollisionProperty(t.entityelement[e].obj, 1);
+				}
+				//  ensure all transparency modes set for each entity
+				if (t.entityprofile[t.entid].ismarker == 0)
+				{
 					{
-						SetObjectCollisionProperty (  t.entityelement[t.e].obj,1 );
+						int iNeverFive = t.entityelement[e].eleprof.transparency;
+						if (iNeverFive == 5) iNeverFive = 6;
+						SetObjectTransparency(t.entityelement[e].obj, iNeverFive);
 					}
-					//  ensure all transparency modes set for each entity
-					if (  t.entityprofile[t.entid].ismarker == 0 ) 
-					{
-						{
-							int iNeverFive = t.entityelement[t.e].eleprof.transparency;
-							if (iNeverFive == 5) iNeverFive = 6;
-							SetObjectTransparency(t.entityelement[t.e].obj, iNeverFive);
-						}
-					}
-					//  update gun/flak settings from latest entity properties
-					t.tgunid_s=t.entityprofile[t.entid].isweapon_s;
-					entity_getgunidandflakid ( );
-					if (  t.tgunid>0 ) 
-					{
-						int firemode = 0; // 110718 - entity properties should only edit first primary gun settings (so we dont mess up enhanced weapons)
-						//for ( int firemode = 0; firemode < 2; firemode++ )
-						g.firemodes[t.tgunid][firemode].settings.damage=t.entityelement[t.e].eleprof.damage;
-						g.firemodes[t.tgunid][firemode].settings.accuracy=t.entityelement[t.e].eleprof.accuracy;
-						g.firemodes[t.tgunid][firemode].settings.reloadqty=t.entityelement[t.e].eleprof.reloadqty;
-						g.firemodes[t.tgunid][firemode].settings.iterate=t.entityelement[t.e].eleprof.fireiterations;
-						g.firemodes[t.tgunid][firemode].settings.range=t.entityelement[t.e].eleprof.range;
-						g.firemodes[t.tgunid][firemode].settings.dropoff=t.entityelement[t.e].eleprof.dropoff;
-						g.firemodes[t.tgunid][firemode].settings.usespotlighting=t.entityelement[t.e].eleprof.usespotlighting;
-					}
+				}
+				//  update gun/flak settings from latest entity properties
+				t.tgunid_s = t.entityprofile[t.entid].isweapon_s;
+				entity_getgunidandflakid();
+				if (t.tgunid > 0)
+				{
+					int firemode = 0; // 110718 - entity properties should only edit first primary gun settings (so we dont mess up enhanced weapons)
+									  //for ( int firemode = 0; firemode < 2; firemode++ )
+					g.firemodes[t.tgunid][firemode].settings.damage = t.entityelement[e].eleprof.damage;
+					g.firemodes[t.tgunid][firemode].settings.accuracy = t.entityelement[e].eleprof.accuracy;
+					g.firemodes[t.tgunid][firemode].settings.reloadqty = t.entityelement[e].eleprof.reloadqty;
+					g.firemodes[t.tgunid][firemode].settings.iterate = t.entityelement[e].eleprof.fireiterations;
+					g.firemodes[t.tgunid][firemode].settings.range = t.entityelement[e].eleprof.range;
+					g.firemodes[t.tgunid][firemode].settings.dropoff = t.entityelement[e].eleprof.dropoff;
+					g.firemodes[t.tgunid][firemode].settings.usespotlighting = t.entityelement[e].eleprof.usespotlighting;
 				}
 			}
 		}
 	}
-	//timestampactivity(0, "Configure entity attachments and AI obstacles: DONE");
+}
+
+void entity_init ( void )
+{
+	//  pre-create element data (load from eleprof)
+	timestampactivity(0,"Configure entity instances for use");
+	std::vector< std::future<void> > results;
+	for ( t.e = 1 ; t.e<=  g.entityelementlist; t.e++ )
+	{
+		results.emplace_back(g_pThreadPool->enqueue(entity_init_thread, t.e));
+	}
+	for (auto && result : results)
+		result.get();
+
+	//  activate all entities and perform any pre-test game setup
+	timestampactivity(0,"Configure entity attachments and AI obstacles");
+	g.entityattachmentindex=0;
 }
 
 void entity_bringnewentitiestolife ( void )
@@ -651,325 +653,348 @@ void entity_resumeanimations ( void )
 	UnDim (  t.storeanimspeeds );
 }
 
-void entity_loop ( void )
+void entity_loop_thread(entity_thread_data* pData)
 {
-	//  Handle all entities in level
-	for ( t.e = 1 ; t.e<=  g.entityelementlist; t.e++ )
+	int e = pData->e;
+
+	// only handle DYNAMIC entities
+	t.entid = t.entityelement[e].bankindex;
+	if (t.entid > 0)
 	{
-		// 011016 - scenes with LARGE number of static entities hitting perf hard
-		if ( t.entityelement[t.e].staticflag == 1 && t.entityelement[t.e].eleprof.phyalways == 0 ) continue;
-		// NOTE: Determine essential tasks static needs (i.e. plrdist??)
+		//  Entity object
+		t.tobj = t.entityelement[e].obj;
 
-		// only handle DYNAMIC entities
-		t.entid=t.entityelement[t.e].bankindex;
-		if ( t.entid>0 ) 
+		//  Entity Prompt Local
+		if (t.entityelement[e].overprompttimer > 0)
 		{
-			//  Entity object
-			t.tobj=t.entityelement[t.e].obj;
-
-			//  Entity Prompt Local
-			if ( t.entityelement[t.e].overprompttimer>0 ) 
+			if (ObjectExist(t.tobj) == 1)
 			{
-				if ( ObjectExist(t.tobj) == 1 ) 
+#ifdef VRTECH
+				if (Timer() > (int)t.entityelement[e].overprompttimer)
 				{
-					#ifdef VRTECH
-					if ( Timer()>(int)t.entityelement[t.e].overprompttimer ) 
-					{
-						if ( t.entityelement[t.e].overpromptuse3D == false ) 
-							t.entityelement[t.e].overprompttimer=0;
-						else
-							lua_hideperentity3d ( t.e );
-					}
+					if (t.entityelement[e].overpromptuse3D == false)
+						t.entityelement[e].overprompttimer = 0;
 					else
-					{
-						if ( t.entityelement[t.e].overpromptuse3D == false )
-						{
-							if ( GetInScreen(t.tobj) == 1 ) 
-							{
-								t.t_s=t.entityelement[t.e].overprompt_s ; t.twidth=getbitmapfontwidth(t.t_s.Get(),1)/2;
-								pastebitmapfont(t.t_s.Get(),GetScreenX(t.tobj)-t.twidth,GetScreenY(t.tobj),1,255);
-							}
-						}
-						else
-						{
-							lua_updateperentity3d ( t.e, t.entityelement[t.e].overprompt_s.Get(), t.entityelement[t.e].overprompt3dX, t.entityelement[t.e].overprompt3dY, t.entityelement[t.e].overprompt3dZ, t.entityelement[t.e].overprompt3dAY, t.entityelement[t.e].overprompt3dFaceCamera );
-						}
-					}
-					#else
-					if (  Timer()>(int)t.entityelement[t.e].overprompttimer ) 
-					{
-						t.entityelement[t.e].overprompttimer=0;
-					}
-					else
-					{
-						if (  GetInScreen(t.tobj) == 1 ) 
-						{
-							t.t_s=t.entityelement[t.e].overprompt_s ; t.twidth=getbitmapfontwidth(t.t_s.Get(),1)/2;
-							pastebitmapfont(t.t_s.Get(),GetScreenX(t.tobj)-t.twidth,GetScreenY(t.tobj),1,255);
-						}
-					}
-					#endif
-				}
-			}
-
-			// if ragdoll and has force, apply it repeatedly
-			if ( t.tobj>0 ) 
-			{
-				if ( t.entityelement[t.e].ragdollified == 1 && t.entityelement[t.e].ragdollifiedforcevalue_f>1.0 ) 
-				{
-					BPhys_RagDollApplyForce (  t.tobj,t.entityelement[t.e].ragdollifiedforcelimb,0,0,0,t.entityelement[t.e].ragdollifiedforcex_f,t.entityelement[t.e].ragdollifiedforcey_f,t.entityelement[t.e].ragdollifiedforcez_f,t.entityelement[t.e].ragdollifiedforcevalue_f );
-					t.entityelement[t.e].ragdollifiedforcevalue_f=t.entityelement[t.e].ragdollifiedforcevalue_f*0.75;
-					if ( t.entityelement[t.e].ragdollifiedforcevalue_f <= 1.0 ) 
-					{
-						t.entityelement[t.e].ragdollifiedforcevalue_f=0;
-					}
-				}
-			}
-
-			//  obtain distance from camera/player
-			entity_controlrecalcdist ( );
-			if ( abs(t.entityelement[t.e].plrdist-t.dist_f)>10 ) 
-			{
-				t.entityelement[t.e].lua.flagschanged=1;
-			}
-			t.entityelement[t.e].plrdist=t.dist_f;
-
-			// control immunity for entities
-			if ( t.entityelement[t.e].briefimmunity > 0 )
-			{
-				t.entityelement[t.e].briefimmunity--;
-			}
-
-			// in all active states, must repell player to avoid penetration
-			if ( t.tobj > 0 ) 
-			{
-				if ( t.entityprofile[t.entid].ischaracter == 1 || t.entityprofile[t.entid].collisionmode == 21 ) 
-				{
-					if ( t.entityelement[t.e].health>0 && t.entityelement[t.e].usingphysicsnow == 1 ) 
-					{
-						bool bThirdPersonPlayer = false;
-						if ( t.playercontrol.thirdperson.enabled == 1 && t.playercontrol.thirdperson.charactere == t.e ) bThirdPersonPlayer = true;
-						if ( bThirdPersonPlayer == false )
-						{
-							t.tplrproxx_f=ObjectPositionX(t.aisystem.objectstartindex)-ObjectPositionX(t.tobj);
-							t.tplrproyy_f=ObjectPositionY(t.aisystem.objectstartindex)-ObjectPositionY(t.tobj);
-							t.tplrproxz_f=ObjectPositionZ(t.aisystem.objectstartindex)-ObjectPositionZ(t.tobj);
-							t.tplrproxd_f=Sqrt(abs(t.tplrproxx_f*t.tplrproxx_f)+abs(t.tplrproyy_f*t.tplrproyy_f)+abs(t.tplrproxz_f*t.tplrproxz_f));
-							t.tplrproxa_f=atan2deg(t.tplrproxx_f,t.tplrproxz_f);
-							if (  t.tplrproxd_f<t.entityprofile[t.entid].fatness ) 
-							{
-								t.playercontrol.pushforce_f=1.0;
-								t.playercontrol.pushangle_f=t.tplrproxa_f;
-							}
-						}
-					}
-				}
-			}
-
-			// Handle when entity limb flinch hurt system
-			if ( t.entityelement[t.e].limbhurt>0 && t.entityelement[t.e].health>0 ) 
-			{
-				//  known limbs
-				t.headlimbofcharacter=t.entityprofile[t.entityelement[t.e].bankindex].headlimb;
-				t.spine2limbofcharacter=t.entityprofile[t.entityelement[t.e].bankindex].spine2;
-				//  determine which segment the limb belongs
-				t.tsegmenttoflinch=0;
-				if (  t.entityelement[t.e].limbhurt == t.headlimbofcharacter  )  t.tsegmenttoflinch = 1;
-				//  degrade flinch value until finished
-				t.tsmoothspeed_f=3.0/g.timeelapsed_f;
-				t.entityelement[t.e].limbhurta_f=CurveValue(0,t.entityelement[t.e].limbhurta_f,t.tsmoothspeed_f);
-				if (  abs(t.entityelement[t.e].limbhurta_f)<1.0 ) 
-				{
-					t.entityelement[t.e].limbhurta_f=0;
-					t.entityelement[t.e].limbhurt=0;
-				}
-				//  modify character limbs based on segment hurt
-				if (  t.tobj>0 ) 
-				{
-					if (  ObjectExist(t.tobj) == 1 ) 
-					{
-						if (  t.tsegmenttoflinch == 0 ) 
-						{
-							if (  t.spine2limbofcharacter>0 ) 
-							{
-								if (  LimbExist(t.tobj,t.spine2limbofcharacter) == 1 ) 
-								{
-									RotateLimb (  t.tobj,t.spine2limbofcharacter,t.entityelement[t.e].limbhurta_f/3.0,t.entityelement[t.e].limbhurta_f*-1,0 );
-								}
-							}
-						}
-						if (  t.tsegmenttoflinch == 1 ) 
-						{
-							if (  t.headlimbofcharacter>0 ) 
-							{
-								if (  LimbExist(t.tobj,t.headlimbofcharacter) == 1 ) 
-								{
-									RotateLimb (  t.tobj,t.headlimbofcharacter,t.entityelement[t.e].limbhurta_f,LimbAngleY(t.tobj,t.headlimbofcharacter),LimbAngleZ(t.tobj,t.headlimbofcharacter) );
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// if entity using non-3d sound, needs to update based on camera position
-			// (can also be used for moving entities that LoopSound ( later) )
-			if ( t.entityelement[t.e].soundisnonthreedee == 1 ) 
-			{
-				t.entityelement[t.e].soundisnonthreedee=0;
-				if ( t.entityelement[t.e].soundset>0 ) 
-				{
-					PositionSound (  t.entityelement[t.e].soundset,CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0) );
-					if ( SoundPlaying(t.entityelement[t.e].soundset) == 1 ) 
-					{
-						t.entityelement[t.e].soundisnonthreedee=1;
-					}
-				}
-				if ( t.entityelement[t.e].soundset1>0 ) 
-				{
-					PositionSound (  t.entityelement[t.e].soundset1,CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0) );
-					if (  SoundPlaying(t.entityelement[t.e].soundset1) == 1 ) 
-					{
-						t.entityelement[t.e].soundisnonthreedee=1;
-					}
-				}
-				if (  t.entityelement[t.e].soundset2>0 ) 
-				{
-					PositionSound (  t.entityelement[t.e].soundset2,CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0) );
-					if (  SoundPlaying(t.entityelement[t.e].soundset2) == 1 ) 
-					{
-						t.entityelement[t.e].soundisnonthreedee=1;
-					}
-				}
-				if (  t.entityelement[t.e].soundset3>0 ) 
-				{
-					PositionSound (  t.entityelement[t.e].soundset3,CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0) );
-					if (  SoundPlaying(t.entityelement[t.e].soundset3) == 1 ) 
-					{
-						t.entityelement[t.e].soundisnonthreedee=1;
-					}
-				}
-				if (  t.entityelement[t.e].soundset4>0 ) 
-				{
-					PositionSound (  t.entityelement[t.e].soundset4,CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0) );
-					if (  SoundPlaying(t.entityelement[t.e].soundset4) == 1 ) 
-					{
-						t.entityelement[t.e].soundisnonthreedee=1;
-					}
-				}
-			}
-
-			// character creator object
-			if ( t.entityprofile[t.entid].ischaractercreator == 1 ) 
-			{
-				t.tccobj = g.charactercreatorrmodelsoffset+((t.e*3)-t.characterkitcontrol.offset);
-				if ( ObjectExist(t.tccobj) == 1 ) 
-				{
-					// only glue head if enemy is visible
-					t.tconstantlygluehead=0;
-					if ( t.tobj>0 ) { if ( GetVisible(t.tobj)==1 ) { t.tconstantlygluehead=1; } } 
-					if ( t.game.runasmultiplayer == 1 ) 
-					{
-						// deal with multiplayer issues - if ( its me, ) only show me when im dead
-						if ( t.characterkitcontrol.showmyhead == 1 && t.e == t.mp_playerEntityID[g.mp.me] ) 
-						{
-							t.tconstantlygluehead=1;
-						}
-						// if other players are dead and transitioning to a new spawn postion
-						for ( t.ttemploop = 0 ; t.ttemploop <= MP_MAX_NUMBER_OF_PLAYERS; t.ttemploop++ )
-						{
-							if ( t.ttemploop != g.mp.me ) 
-							{
-								#ifdef PHOTONMP
-								 int iAlive = PhotonGetPlayerAlive(t.ttemploop);
-								#else
-								 int iAlive = SteamGetPlayerAlive(t.ttemploop);
-								#endif
-								if ( t.e == t.mp_playerEntityID[t.ttemploop] && t.mp_forcePosition[t.ttemploop]>0 && iAlive == 1 ) 
-								{
-									t.tconstantlygluehead=0;
-								}
-							}
-						}
-					}
-					// if head is flagged to by glued, attach to body now
-					if ( t.tconstantlygluehead == 1 ) 
-					{
-						// NOTE; re-searching for head limb is a performance hit
-						t.tSourcebip01_head=getlimbbyname(t.entityelement[t.e].obj, "Bip01_Head");
-						if ( t.tSourcebip01_head>0 ) 
-						{
-							//Dave - fix to heads being backwards for characters when switched off (3000 units away)
-							float tdx = CameraPositionX(0) - ObjectPositionX(t.entityelement[t.e].obj);
-							float tdy = CameraPositionY(0) - ObjectPositionY(t.entityelement[t.e].obj);
-							float tdz = CameraPositionZ(0) - ObjectPositionZ(t.entityelement[t.e].obj);
-							float tdist = sqrt ( tdx*tdx + tdy*tdy + tdz*tdz );
-							t.te = t.e; entity_getmaxfreezedistance ( );
-							if ( tdist > t.maximumnonefreezedistance )
-							{
-								YRotateObject (  t.tccobj, ObjectAngleY(t.entityelement[t.e].obj)-180 );
-							}
-							else
-							{
-								YRotateObject (  t.tccobj, 0 );								
-							}							
-							GlueObjectToLimbEx (  t.tccobj,t.entityelement[t.e].obj,t.tSourcebip01_head,2 );
-						}
-					}
-					else
-					{
-						//  else unglue and hide the head
-						UnGlueObject (  t.tccobj );
-						PositionObject (  t.tccobj,100000,100000,100000 );
-					}
-				}
-			}
-
-			// handle particle emitter entity (for when in game)
-
-			// flag to destroy entity dead (can be set from LUA command or explosion trigger)
-			if ( t.entityelement[t.e].destroyme == 1 ) 
-			{
-				// remove entity from game play
-				t.entityelement[t.e].destroyme = 0;
-				t.entityelement[t.e].active = 0;
-				t.entityelement[t.e].health = 0;
-				t.entityelement[t.e].lua.flagschanged = 2;
-				if ( t.game.runasmultiplayer == 1 ) 
-				{
-					mp_addDestroyedObject ( );
-				}
-				t.obj=t.entityelement[t.e].obj;
-				if (  t.obj>0 ) 
-				{
-					if (  ObjectExist(t.obj) == 1 ) 
-					{
-						HideObject (  t.obj );
-					}
-				}
-
-				//  attempt to remove collision object
-				entity_lua_collisionoff ( );
-
-				//  possible remove character
-				entity_lua_findcharanimstate ( );
-				if (  t.tcharanimindex != -1 ) 
-				{
-					//  deactivate DarkA.I for this dead entity
-					darkai_killai ( );
-
-					//  Convert object back to instance and hide it
-					darkai_character_remove ( );
-					t.charanimstates[t.tcharanimindex] = t.charanimstate;
+						lua_hideperentity3d(e);
 				}
 				else
 				{
-					//  can still have non-character ragdoll (zombie), so remove ragdoll if so
-					t.tphyobj=t.obj ; ragdoll_destroy ( );
+					if (t.entityelement[e].overpromptuse3D == false)
+					{
+						if (GetInScreen(t.tobj) == 1)
+						{
+							t.t_s = t.entityelement[e].overprompt_s; t.twidth = getbitmapfontwidth(t.t_s.Get(), 1) / 2;
+							pastebitmapfont(t.t_s.Get(), GetScreenX(t.tobj) - t.twidth, GetScreenY(t.tobj), 1, 255);
+						}
+					}
+					else
+					{
+						lua_updateperentity3d(e, t.entityelement[e].overprompt_s.Get(), t.entityelement[e].overprompt3dX, t.entityelement[e].overprompt3dY, t.entityelement[e].overprompt3dZ, t.entityelement[e].overprompt3dAY, t.entityelement[e].overprompt3dFaceCamera);
+					}
+				}
+#else
+				if (Timer() > (int)t.entityelement[e].overprompttimer)
+				{
+					t.entityelement[e].overprompttimer = 0;
+				}
+				else
+				{
+					if (GetInScreen(t.tobj) == 1)
+					{
+						t.t_s = t.entityelement[e].overprompt_s; t.twidth = getbitmapfontwidth(t.t_s.Get(), 1) / 2;
+						pastebitmapfont(t.t_s.Get(), GetScreenX(t.tobj) - t.twidth, GetScreenY(t.tobj), 1, 255);
+					}
+				}
+#endif
+			}
+		}
+
+		// if ragdoll and has force, apply it repeatedly
+		if (t.tobj > 0)
+		{
+			if (t.entityelement[e].ragdollified == 1 && t.entityelement[e].ragdollifiedforcevalue_f > 1.0)
+			{
+				BPhys_RagDollApplyForce(t.tobj, t.entityelement[e].ragdollifiedforcelimb, 0, 0, 0, t.entityelement[e].ragdollifiedforcex_f, t.entityelement[e].ragdollifiedforcey_f, t.entityelement[e].ragdollifiedforcez_f, t.entityelement[e].ragdollifiedforcevalue_f);
+				t.entityelement[e].ragdollifiedforcevalue_f = t.entityelement[e].ragdollifiedforcevalue_f*0.75;
+				if (t.entityelement[e].ragdollifiedforcevalue_f <= 1.0)
+				{
+					t.entityelement[e].ragdollifiedforcevalue_f = 0;
 				}
 			}
 		}
+
+		//  obtain distance from camera/player
+		entity_controlrecalcdist();
+		if (abs(t.entityelement[e].plrdist - t.dist_f) > 10)
+		{
+			t.entityelement[e].lua.flagschanged = 1;
+		}
+		t.entityelement[e].plrdist = t.dist_f;
+
+		// control immunity for entities
+		if (t.entityelement[e].briefimmunity > 0)
+		{
+			t.entityelement[e].briefimmunity--;
+		}
+
+		// in all active states, must repell player to avoid penetration
+		if (t.tobj > 0)
+		{
+			if (t.entityprofile[t.entid].ischaracter == 1 || t.entityprofile[t.entid].collisionmode == 21)
+			{
+				if (t.entityelement[e].health > 0 && t.entityelement[e].usingphysicsnow == 1)
+				{
+					bool bThirdPersonPlayer = false;
+					if (t.playercontrol.thirdperson.enabled == 1 && t.playercontrol.thirdperson.charactere == e) bThirdPersonPlayer = true;
+					if (bThirdPersonPlayer == false)
+					{
+						t.tplrproxx_f = ObjectPositionX(t.aisystem.objectstartindex) - ObjectPositionX(t.tobj);
+						t.tplrproyy_f = ObjectPositionY(t.aisystem.objectstartindex) - ObjectPositionY(t.tobj);
+						t.tplrproxz_f = ObjectPositionZ(t.aisystem.objectstartindex) - ObjectPositionZ(t.tobj);
+						t.tplrproxd_f = Sqrt(abs(t.tplrproxx_f*t.tplrproxx_f) + abs(t.tplrproyy_f*t.tplrproyy_f) + abs(t.tplrproxz_f*t.tplrproxz_f));
+						t.tplrproxa_f = atan2deg(t.tplrproxx_f, t.tplrproxz_f);
+						if (t.tplrproxd_f < t.entityprofile[t.entid].fatness)
+						{
+							t.playercontrol.pushforce_f = 1.0;
+							t.playercontrol.pushangle_f = t.tplrproxa_f;
+						}
+					}
+				}
+			}
+		}
+
+		// Handle when entity limb flinch hurt system
+		if (t.entityelement[e].limbhurt > 0 && t.entityelement[e].health > 0)
+		{
+			//  known limbs
+			t.headlimbofcharacter = t.entityprofile[t.entityelement[e].bankindex].headlimb;
+			t.spine2limbofcharacter = t.entityprofile[t.entityelement[e].bankindex].spine2;
+			//  determine which segment the limb belongs
+			t.tsegmenttoflinch = 0;
+			if (t.entityelement[e].limbhurt == t.headlimbofcharacter)  t.tsegmenttoflinch = 1;
+			//  degrade flinch value until finished
+			t.tsmoothspeed_f = 3.0 / g.timeelapsed_f;
+			t.entityelement[e].limbhurta_f = CurveValue(0, t.entityelement[e].limbhurta_f, t.tsmoothspeed_f);
+			if (abs(t.entityelement[e].limbhurta_f) < 1.0)
+			{
+				t.entityelement[e].limbhurta_f = 0;
+				t.entityelement[e].limbhurt = 0;
+			}
+			//  modify character limbs based on segment hurt
+			if (t.tobj > 0)
+			{
+				if (ObjectExist(t.tobj) == 1)
+				{
+					if (t.tsegmenttoflinch == 0)
+					{
+						if (t.spine2limbofcharacter > 0)
+						{
+							if (LimbExist(t.tobj, t.spine2limbofcharacter) == 1)
+							{
+								RotateLimb(t.tobj, t.spine2limbofcharacter, t.entityelement[e].limbhurta_f / 3.0, t.entityelement[e].limbhurta_f*-1, 0);
+							}
+						}
+					}
+					if (t.tsegmenttoflinch == 1)
+					{
+						if (t.headlimbofcharacter > 0)
+						{
+							if (LimbExist(t.tobj, t.headlimbofcharacter) == 1)
+							{
+								RotateLimb(t.tobj, t.headlimbofcharacter, t.entityelement[e].limbhurta_f, LimbAngleY(t.tobj, t.headlimbofcharacter), LimbAngleZ(t.tobj, t.headlimbofcharacter));
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// if entity using non-3d sound, needs to update based on camera position
+		// (can also be used for moving entities that LoopSound ( later) )
+		if (t.entityelement[e].soundisnonthreedee == 1)
+		{
+			t.entityelement[e].soundisnonthreedee = 0;
+			if (t.entityelement[e].soundset > 0)
+			{
+				PositionSound(t.entityelement[e].soundset, CameraPositionX(0), CameraPositionY(0), CameraPositionZ(0));
+				if (SoundPlaying(t.entityelement[e].soundset) == 1)
+				{
+					t.entityelement[e].soundisnonthreedee = 1;
+				}
+			}
+			if (t.entityelement[e].soundset1 > 0)
+			{
+				PositionSound(t.entityelement[e].soundset1, CameraPositionX(0), CameraPositionY(0), CameraPositionZ(0));
+				if (SoundPlaying(t.entityelement[e].soundset1) == 1)
+				{
+					t.entityelement[e].soundisnonthreedee = 1;
+				}
+			}
+			if (t.entityelement[e].soundset2 > 0)
+			{
+				PositionSound(t.entityelement[e].soundset2, CameraPositionX(0), CameraPositionY(0), CameraPositionZ(0));
+				if (SoundPlaying(t.entityelement[e].soundset2) == 1)
+				{
+					t.entityelement[e].soundisnonthreedee = 1;
+				}
+			}
+			if (t.entityelement[e].soundset3 > 0)
+			{
+				PositionSound(t.entityelement[e].soundset3, CameraPositionX(0), CameraPositionY(0), CameraPositionZ(0));
+				if (SoundPlaying(t.entityelement[e].soundset3) == 1)
+				{
+					t.entityelement[e].soundisnonthreedee = 1;
+				}
+			}
+			if (t.entityelement[e].soundset4 > 0)
+			{
+				PositionSound(t.entityelement[e].soundset4, CameraPositionX(0), CameraPositionY(0), CameraPositionZ(0));
+				if (SoundPlaying(t.entityelement[e].soundset4) == 1)
+				{
+					t.entityelement[e].soundisnonthreedee = 1;
+				}
+			}
+		}
+
+		// character creator object
+		if (t.entityprofile[t.entid].ischaractercreator == 1)
+		{
+			t.tccobj = g.charactercreatorrmodelsoffset + ((e*3) - t.characterkitcontrol.offset);
+			if (ObjectExist(t.tccobj) == 1)
+			{
+				// only glue head if enemy is visible
+				t.tconstantlygluehead = 0;
+				if (t.tobj > 0) { if (GetVisible(t.tobj) == 1) { t.tconstantlygluehead = 1; } }
+				if (t.game.runasmultiplayer == 1)
+				{
+					// deal with multiplayer issues - if ( its me, ) only show me when im dead
+					if (t.characterkitcontrol.showmyhead == 1 && e == t.mp_playerEntityID[g.mp.me])
+					{
+						t.tconstantlygluehead = 1;
+					}
+					// if other players are dead and transitioning to a new spawn postion
+					for (t.ttemploop = 0; t.ttemploop <= MP_MAX_NUMBER_OF_PLAYERS; t.ttemploop++)
+					{
+						if (t.ttemploop != g.mp.me)
+						{
+#ifdef PHOTONMP
+							int iAlive = PhotonGetPlayerAlive(t.ttemploop);
+#else
+							int iAlive = SteamGetPlayerAlive(t.ttemploop);
+#endif
+							if (e == t.mp_playerEntityID[t.ttemploop] && t.mp_forcePosition[t.ttemploop] > 0 && iAlive == 1)
+							{
+								t.tconstantlygluehead = 0;
+							}
+						}
+					}
+				}
+				// if head is flagged to by glued, attach to body now
+				if (t.tconstantlygluehead == 1)
+				{
+					// NOTE; re-searching for head limb is a performance hit
+					t.tSourcebip01_head = getlimbbyname(t.entityelement[e].obj, "Bip01_Head");
+					if (t.tSourcebip01_head > 0)
+					{
+						//Dave - fix to heads being backwards for characters when switched off (3000 units away)
+						float tdx = CameraPositionX(0) - ObjectPositionX(t.entityelement[e].obj);
+						float tdy = CameraPositionY(0) - ObjectPositionY(t.entityelement[e].obj);
+						float tdz = CameraPositionZ(0) - ObjectPositionZ(t.entityelement[e].obj);
+						float tdist = sqrt(tdx*tdx + tdy * tdy + tdz * tdz);
+						t.te = e; entity_getmaxfreezedistance();
+						if (tdist > t.maximumnonefreezedistance)
+						{
+							YRotateObject(t.tccobj, ObjectAngleY(t.entityelement[e].obj) - 180);
+						}
+						else
+						{
+							YRotateObject(t.tccobj, 0);
+						}
+						GlueObjectToLimbEx(t.tccobj, t.entityelement[e].obj, t.tSourcebip01_head, 2);
+					}
+				}
+				else
+				{
+					//  else unglue and hide the head
+					UnGlueObject(t.tccobj);
+					PositionObject(t.tccobj, 100000, 100000, 100000);
+				}
+			}
+		}
+
+		// handle particle emitter entity (for when in game)
+
+		// if entity is a portal, add it to the portal renderer
+		if (t.entityprofile[t.entid].isportal == 1)
+		{
+			g_pPortalRenderer->addPortal(
+				t.entityelement[e].eleprof.portal.p1,
+				t.entityelement[e].eleprof.portal.p2,
+				t.entityelement[e].eleprof.portal.p3,
+				t.entityelement[e].eleprof.portal.p4
+			);
+		}
+
+		// flag to destroy entity dead (can be set from LUA command or explosion trigger)
+		if (t.entityelement[e].destroyme == 1)
+		{
+			// remove entity from game play
+			t.entityelement[e].destroyme = 0;
+			t.entityelement[e].active = 0;
+			t.entityelement[e].health = 0;
+			t.entityelement[e].lua.flagschanged = 2;
+			if (t.game.runasmultiplayer == 1)
+			{
+				mp_addDestroyedObject();
+			}
+			t.obj = t.entityelement[e].obj;
+			if (t.obj > 0)
+			{
+				if (ObjectExist(t.obj) == 1)
+				{
+					HideObject(t.obj);
+				}
+			}
+
+			//  attempt to remove collision object
+			entity_lua_collisionoff();
+
+			//  possible remove character
+			entity_lua_findcharanimstate();
+			if (t.tcharanimindex != -1)
+			{
+				//  deactivate DarkA.I for this dead entity
+				darkai_killai();
+
+				//  Convert object back to instance and hide it
+				darkai_character_remove();
+				t.charanimstates[t.tcharanimindex] = t.charanimstate;
+			}
+			else
+			{
+				//  can still have non-character ragdoll (zombie), so remove ragdoll if so
+				t.tphyobj = t.obj; ragdoll_destroy();
+			}
+		}
 	}
+}
+
+void entity_loop ( void )
+{
+	//  Handle all entities in level
+	std::vector< std::future<void> > results;
+	for (t.e = 1; t.e <= g.entityelementlist; t.e++)
+	{
+		// 011016 - scenes with LARGE number of static entities hitting perf hard
+		if (t.entityelement[t.e].staticflag == 1 && t.entityelement[t.e].eleprof.phyalways == 0) continue;
+		// NOTE: Determine essential tasks static needs (i.e. plrdist??)
+		entity_thread_data* pData = new entity_thread_data();
+		pData->e = t.e;
+		results.emplace_back(g_pThreadPool->enqueue(entity_loop_thread, pData));
+	}
+
+	for (auto && result : results)
+		result.get();
 
 	//  handle explosion triggers in separate loop as they call
 	//  other subroutines that use E and other entity calls (i.e. physics_explodesphere)
@@ -2944,6 +2969,12 @@ void entity_createobj ( void )
 
 		//  SetObject (  properties )
 		t.tobj=t.obj ; t.tte=t.tupdatee ; entity_prepareobj ( );
+
+		// Add object to LOD manager
+		if (g_pLODManager)
+		{
+			g_pLODManager->addObject(t.obj);
+		}
 
 		//  check if a character creator entity
 		#ifdef VRTECH

@@ -5366,6 +5366,7 @@ struct entityprofiletype
 	int iThumbnailSmall;
 	int iThumbnailLarge;
 	int synccount;
+	int isportal;
 
 	// Constructor
 	entityprofiletype ( )
@@ -5619,10 +5620,19 @@ struct PropertiesVariables {
 };
 
 //  Entity Element Custom Profile Data
+struct portaltype
+{
+	cVector3 p1;
+	cVector3 p2;
+	cVector3 p3;
+	cVector3 p4;
+};
+
 struct entityeleproftype
 {
 	int groupreference;
 	cstr name_s;
+	portaltype portal;
 	int aiinit;
 	cstr aimain_s;
 	cstr aimainname_s;

@@ -1937,6 +1937,34 @@ void entity_loaddata ( void )
 					t.tryfield_s = "drawcallscaleadjust";
 					if (t.field_s == t.tryfield_s)  t.entityprofile[t.entid].drawcallscaleadjust = t.value1;
 
+					t.tryfield_s = "isportal";
+					if (t.field_s == t.tryfield_s)  t.entityprofile[t.entid].isportal = t.value1;
+
+					t.tryfield_s = "portalpoint1x";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p1.x = t.value1;
+					t.tryfield_s = "portalpoint1y";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p1.y = t.value1;
+					t.tryfield_s = "portalpoint1z";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p1.z = t.value1;
+					t.tryfield_s = "portalpoint2x";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p2.x = t.value1;
+					t.tryfield_s = "portalpoint2y";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p2.y = t.value1;
+					t.tryfield_s = "portalpoint2z";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p2.z = t.value1;
+					t.tryfield_s = "portalpoint3x";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p3.x = t.value1;
+					t.tryfield_s = "portalpoint3y";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p3.y = t.value1;
+					t.tryfield_s = "portalpoint3z";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p3.z = t.value1;
+					t.tryfield_s = "portalpoint4x";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p4.x = t.value1;
+					t.tryfield_s = "portalpoint4y";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p4.y = t.value1;
+					t.tryfield_s = "portalpoint4z";
+					if (t.field_s == t.tryfield_s)  t.entityelement[t.e].eleprof.portal.p4.z = t.value1;
+
 					#ifdef VRTECH
 					#else
 					t.tryfield_s = "startanimingame";
@@ -3433,6 +3461,21 @@ void entity_loadtexturesandeffect ( void )
 				{
 					// but only if diffuse specified, else use texture already loaded for model
 					TextureObject ( t.entobj, 0, t.entityprofile[t.entid].texdid );
+					sObject* pObject = GetObjectData(t.entobj);
+					if (pObject)
+					{
+						pObject->pLodTexture[0] = GetImagePointer(t.entityprofile[t.entid].texdid);
+						char pLodTextureName[256];
+						strcpy(pLodTextureName, GetImageName(t.entityprofile[t.entid].texdid));
+						for (int i = 1; i < 4; i++)
+						{
+							char pNewName[256];
+							strcpy(pNewName, pLodTextureName);
+							pNewName[strlen(pNewName) - 4] = 0;
+							sprintf(pNewName, "%s_lod%d.dds", pNewName, i);
+							pObject->pLodTexture[i] = LoadImage(pNewName);
+						}
+					}
 				}
 				TextureObject ( t.entobj, 2, t.entityprofile[t.entid].texnid );
 				TextureObject ( t.entobj, 3, t.entityprofile[t.entid].texsid );

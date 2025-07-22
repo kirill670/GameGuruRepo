@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "cThreadPool.h"
 
 // prototypes to link with entity avoidance
 void entity_lua_moveforward_core_nooverlap ( int te, float* pNX, float* pNZ );

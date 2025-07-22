@@ -87,6 +87,14 @@ void postprocess_init ( void )
 					TextureObject(g.postprocessobjectoffset + 0, 3, t.terrain.imagestartindex + 38);
 				}
 
+				// Voxel GI
+				LoadEffect("effectbank\\reloaded\\voxel_gi.fx", g.postprocesseffectoffset + 9, 0);
+				if (GetEffectExist(g.postprocesseffectoffset + 9) == 1)
+				{
+					MakeImage(g.postprocessimageoffset + 10, 128, 128 * 128, 0);
+					TextureObject(g.postprocessobjectoffset + 0, 4, g.postprocessimageoffset + 10);
+				}
+
 				//  special code to instruct this post process shader to generate depth texture
 				//  from the main camera zero and pass into the shader as 'DepthMapTex' texture slot
 				SetVector4 (  g.terrainvectorindex,0,0,0,0 );
@@ -715,6 +723,18 @@ void postprocess_apply ( void )
 {
 	if (  t.gpostprocessmode>0 ) 
 	{
+		// use voxel gi shader
+		if (GetEffectExist(g.postprocesseffectoffset + 9) == 1)
+		{
+			SetObjectEffect(g.postprocessobjectoffset + 0, g.postprocesseffectoffset + 9);
+			SetVector4(g.terrainvectorindex, t.terrain.sundirectionx_f, t.terrain.sundirectiony_f, t.terrain.sundirectionz_f, 0);
+			SetEffectConstantV(g.postprocesseffectoffset + 9, "g_vLightPosition", g.terrainvectorindex);
+			SetVector4(g.terrainvectorindex, t.terrain.suncolorr_f, t.terrain.suncolorg_f, t.terrain.suncolorb_f, 0);
+			SetEffectConstantV(g.postprocesseffectoffset + 9, "g_vLightColor", g.terrainvectorindex);
+			SetVector4(g.terrainvectorindex, CameraPositionX(0), CameraPositionY(0), CameraPositionZ(0), 0);
+			SetEffectConstantV(g.postprocesseffectoffset + 9, "g_vCameraPosition", g.terrainvectorindex);
+		}
+
 		// prepare the render for 'glightraycameraid'
 		if ( t.glightraycameraid>0 ) 
 		{
@@ -807,3 +827,5 @@ void postprocess_setscreencolor ( void )
 	SetEffectConstantV(g.postprocesseffectoffset + 2, "ScreenColor", t.tColorVector);
 	SetEffectConstantV(g.postprocesseffectoffset + 4, "ScreenColor", t.tColorVector);
 }
+
+[end of GameGuru Core/GameGuru/Source/M-Postprocess.cpp]

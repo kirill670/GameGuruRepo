@@ -4,6 +4,16 @@
 
 #include "cstr.h"
 
+struct entity_thread_data
+{
+	int e;
+};
+
+struct entity_init_thread_data
+{
+	int e;
+};
+
 void entity_init ( void );
 void entity_bringnewentitiestolife ( void );
 void entity_initafterphysics ( void );
@@ -15,6 +25,7 @@ void entity_pauseanimations ( void );
 void entity_resumeanimations ( void );
 void entity_loop ( void );
 void entity_loopanim ( void );
+void entity_loop_thread(entity_thread_data* pData);
 void entity_controlrecalcdist ( void );
 void entity_getmaxfreezedistance ( void );
 void entity_updatepos ( void );
